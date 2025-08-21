@@ -1,0 +1,25 @@
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: trapuser
+      POSTGRES_PASSWORD: trappass
+      POSTGRES_DB: trapdb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  app:
+    build: .
+    depends_on:
+      - db
+    environment:
+      - DATABASE_URL=postgresql://trapuser:trappass@db:5432/trapdb
+      - DRIVE_FOLDER_ID=1o6t6tFoK8t9ihUtLonHCpzMMX38qi71x
+    volumes:
+      - ./data:/app/data
+    command: python app.py
+
+volumes:
+  pgdata:
