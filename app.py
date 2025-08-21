@@ -112,37 +112,42 @@ def mark_file_processed(file_id, file_name):
             return False
 
 def extract_and_ingest(file_path):
+    print(f"[{os.getpid()}] Decompressing and parsing {os.path.basename(file_path)}...")
     with gzip.open(file_path, 'rt') as f:
         df = pd.read_csv(f, dtype=str, sep=',')
+    print(f"[{os.getpid()}] Parsed {len(df)} rows from {os.path.basename(file_path)}.")
 
-        # Rename columns to match DB schema
-        df = df.rename(columns={
-            "device.device_uuid": "device_device_uuid",
-            "device.x_device_model_name": "device_x_device_model_name",
-            "device.device_status.arrival": "device_device_status_arrival",
-            "device.device_status.condition": "device_device_status_condition",
-            "device.device_status.strikes": "device_device_status_strikes",
-            "location.location_uuid": "location_location_uuid",
-            "location.location_wkt": "location_location_wkt",
-            "species.species_uuid": "species_species_uuid",
-            "species.x_species_name": "species_x_species_name",
-            "species.species_sex": "species_species_sex",
-            "species.species_age": "species_species_age",
-        })
+    print(f"[{os.getpid()}] Transforming data for {os.path.basename(file_path)}...")
+    # Rename columns to match DB schema
+    df = df.rename(columns={
+        "device.device_uuid": "device_device_uuid",
+        "device.x_device_model_name": "device_x_device_model_name",
+        "device.device_status.arrival": "device_device_status_arrival",
+        "device.device_status.condition": "device_device_status_condition",
+        "device.device_status.strikes": "device_device_status_strikes",
+        "location.location_uuid": "location_location_uuid",
+        "location.location_wkt": "location_location_wkt",
+        "species.species_uuid": "species_species_uuid",
+        "species.x_species_name": "species_x_species_name",
+        "species.species_sex": "species_species_sex",
+        "species.species_age": "species_species_age",
+    })
 
-        # Convert date columns to date type
-        for col in ["date_start", "date_end"]:
-            df[col] = pd.to_datetime(df[col], dayfirst=True, errors='coerce').dt.date
+    # Convert date columns to date type
+    for col in ["date_start", "date_end"]:
+        df[col] = pd.to_datetime(df[col], errors='coerce').dt.date
 
-        # Convert device_device_status_strikes to int
-        df["device_device_status_strikes"] = pd.to_numeric(df["device_device_status_strikes"], errors='coerce').fillna(0).astype(int)
+    # Convert device_device_status_strikes to int
+    df["device_device_status_strikes"] = pd.to_numeric(df["device_device_status_strikes"], errors='coerce').fillna(0).astype(int)
 
-        # Insert JSON columns as JSON string
-        df["substance"] = df["substance"].fillna("[]")
+    # Insert JSON columns as JSON string
+    df["substance"] = df["substance"].fillna("[]")
+    print(f"[{os.getpid()}] Transformation complete for {os.path.basename(file_path)}.")
 
-        # Insert into DB
-        df.to_sql("trap_data", engine, if_exists="append", index=False, method='multi')
-        print(f"Inserted {len(df)} rows.")
+    print(f"[{os.getpid()}] Inserting {len(df)} rows into the database...")
+    # Insert into DB
+    df.to_sql("trap_data", engine, if_exists="append", index=False, method='multi')
+    print(f"[{os.getpid()}] Inserted {len(df)} rows from {os.path.basename(file_path)}.")
 
 def process_file(file_name):
     """Worker function to process a single file."""
