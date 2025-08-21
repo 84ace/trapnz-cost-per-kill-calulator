@@ -16,6 +16,7 @@ services:
       - db
     environment:
       - DATABASE_URL=postgresql://trapuser:trappass@db:5432/trapdb
+      - PYTHONUNBUFFERED=1
     volumes:
       - ./offline:/app/offline
     command: python app.py

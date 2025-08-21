@@ -7,12 +7,13 @@ import psycopg2
 from urllib.parse import urlparse
 import gzip
 import hashlib
+import multiprocessing
+import sqlalchemy.exc
+import os
+from sqlalchemy import event
 
 DATABASE_URL = "postgresql://trapuser:trappass@db:5432/trapdb"
 OFFLINE_DIR = "./offline"
-
-if isinstance(DATABASE_URL, bytes):
-    DATABASE_URL = DATABASE_URL.decode('utf-8')
 
 if not os.path.exists(OFFLINE_DIR):
     os.makedirs(OFFLINE_DIR)
@@ -42,6 +43,20 @@ def wait_for_db(url, timeout=30):
 wait_for_db(DATABASE_URL)
 
 engine = create_engine(DATABASE_URL)
+
+@event.listens_for(engine, "connect")
+def connect(dbapi_connection, connection_record):
+    connection_record.info["pid"] = os.getpid()
+
+@event.listens_for(engine, "checkout")
+def checkout(dbapi_connection, connection_record, connection_proxy):
+    pid = os.getpid()
+    if connection_record.info["pid"] != pid:
+        raise sqlalchemy.exc.DisconnectionError(
+            "Connection record belongs to pid %s, "
+            "attempting to check out in pid %s" %
+            (connection_record.info["pid"], pid)
+        )
 
 # Create tables if not exist
 with engine.connect() as conn:
@@ -85,16 +100,16 @@ def list_local_files(directory):
             files.append(f)
     return files
 
-def file_already_processed(file_id):
-    with engine.connect() as conn:
-        result = conn.execute(text("SELECT 1 FROM processed_files WHERE file_id = :fid"), {"fid": file_id})
-        return result.first() is not None
-
 def mark_file_processed(file_id, file_name):
     with engine.connect() as conn:
-        conn.execute(text("INSERT INTO processed_files (file_id, file_name) VALUES (:fid, :fname)"),
-                     {"fid": file_id, "fname": file_name})
-        conn.commit()
+        try:
+            with conn.begin():
+                conn.execute(text("INSERT INTO processed_files (file_id, file_name) VALUES (:fid, :fname)"),
+                             {"fid": file_id, "fname": file_name})
+            return True
+        except sqlalchemy.exc.IntegrityError:
+            # The transaction is rolled back automatically by conn.begin()
+            return False
 
 def extract_and_ingest(file_path):
     with gzip.open(file_path, 'rt') as f:
@@ -130,26 +145,35 @@ def extract_and_ingest(file_path):
         df.to_sql("trap_data", engine, if_exists="append", index=False, method='multi')
         print(f"Inserted {len(df)} rows.")
 
+def process_file(file_name):
+    """Worker function to process a single file."""
+    file_path = os.path.join(OFFLINE_DIR, file_name)
+
+    with open(file_path, 'rb') as f:
+        file_hash = hashlib.sha256(f.read()).hexdigest()
+
+    if mark_file_processed(file_hash, file_name):
+        print(f"Claimed file {file_name} for processing.")
+        extract_and_ingest(file_path)
+        print(f"Finished processing {file_name}.")
+    else:
+        print(f"Skipping already processed file: {file_name} (hash: {file_hash})")
+
+
 def main():
     print("Listing files in offline folder...")
     files = list_local_files(OFFLINE_DIR)
     print(f"Found {len(files)} .csv.gz files.")
 
-    for file_name in files:
-        file_path = os.path.join(OFFLINE_DIR, file_name)
+    if not files:
+        print("No new files to process.")
+        return
 
-        with open(file_path, 'rb') as f:
-            file_hash = hashlib.sha256(f.read()).hexdigest()
-
-        if file_already_processed(file_hash):
-            print(f"Skipping already processed file: {file_name} (hash: {file_hash})")
-            continue
-
-        print(f"Extracting and ingesting {file_name}...")
-        extract_and_ingest(file_path)
-
-        mark_file_processed(file_hash, file_name)
-        print(f"Processed and marked {file_name} (hash: {file_hash}).")
+    # Use a pool of worker processes to process files in parallel
+    num_processes = multiprocessing.cpu_count()
+    print(f"Using {num_processes} processes to ingest data.")
+    with multiprocessing.Pool(processes=num_processes) as pool:
+        pool.map(process_file, files)
 
     print("Done.")
 
