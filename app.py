@@ -5,7 +5,7 @@ from sqlalchemy import create_engine, text
 import time
 import psycopg2
 from urllib.parse import urlparse
-import tarfile
+import gzip
 import hashlib
 
 DATABASE_URL = "postgresql://trapuser:trappass@db:5432/trapdb"
@@ -78,13 +78,10 @@ with engine.connect() as conn:
     conn.commit()
 
 def list_local_files(directory):
-    """Lists .tar.gz files in the specified directory."""
-    print(f"Scanning for files in: {directory}")
-    all_files = os.listdir(directory)
-    print(f"Found items: {all_files}")
+    """Lists .csv.gz files in the specified directory."""
     files = []
-    for f in all_files:
-        if f.lower().endswith(".tar.gz"):
+    for f in os.listdir(directory):
+        if f.lower().endswith(".csv.gz"):
             files.append(f)
     return files
 
@@ -100,48 +97,42 @@ def mark_file_processed(file_id, file_name):
         conn.commit()
 
 def extract_and_ingest(file_path):
-    with tarfile.open(file_path, "r:gz") as tar:
-        for member in tar.getmembers():
-            if member.name.lower().endswith(".csv"):
-                print(f"Processing CSV: {member.name}")
-                f = tar.extractfile(member)
-                if f is not None:
-                    # Use a tab separator for this particular CSV file
-                    df = pd.read_csv(f, dtype=str, sep='\t', engine='python')
+    with gzip.open(file_path, 'rt') as f:
+        df = pd.read_csv(f, dtype=str, sep='\t', engine='python')
 
-                    # Rename columns to match DB schema
-                    df = df.rename(columns={
-                        "device.device_uuid": "device_device_uuid",
-                        "device.x_device_model_name": "device_x_device_model_name",
-                        "device.device_status.arrival": "device_device_status_arrival",
-                        "device.device_status.condition": "device_device_status_condition",
-                        "device.device_status.strikes": "device_device_status_strikes",
-                        "location.location_uuid": "location_location_uuid",
-                        "location.location_wkt": "location_location_wkt",
-                        "species.species_uuid": "species_species_uuid",
-                        "species.x_species_name": "species_x_species_name",
-                        "species.species_sex": "species_species_sex",
-                        "species.species_age": "species_species_age",
-                    })
+        # Rename columns to match DB schema
+        df = df.rename(columns={
+            "device.device_uuid": "device_device_uuid",
+            "device.x_device_model_name": "device_x_device_model_name",
+            "device.device_status.arrival": "device_device_status_arrival",
+            "device.device_status.condition": "device_device_status_condition",
+            "device.device_status.strikes": "device_device_status_strikes",
+            "location.location_uuid": "location_location_uuid",
+            "location.location_wkt": "location_location_wkt",
+            "species.species_uuid": "species_species_uuid",
+            "species.x_species_name": "species_x_species_name",
+            "species.species_sex": "species_species_sex",
+            "species.species_age": "species_species_age",
+        })
 
-                    # Convert date columns to date type
-                    for col in ["date_start", "date_end"]:
-                        df[col] = pd.to_datetime(df[col], dayfirst=True, errors='coerce').dt.date
+        # Convert date columns to date type
+        for col in ["date_start", "date_end"]:
+            df[col] = pd.to_datetime(df[col], dayfirst=True, errors='coerce').dt.date
 
-                    # Convert device_device_status_strikes to int
-                    df["device_device_status_strikes"] = pd.to_numeric(df["device_device_status_strikes"], errors='coerce').fillna(0).astype(int)
+        # Convert device_device_status_strikes to int
+        df["device_device_status_strikes"] = pd.to_numeric(df["device_device_status_strikes"], errors='coerce').fillna(0).astype(int)
 
-                    # Insert JSON columns as JSON string
-                    df["substance"] = df["substance"].fillna("[]")
+        # Insert JSON columns as JSON string
+        df["substance"] = df["substance"].fillna("[]")
 
-                    # Insert into DB
-                    df.to_sql("trap_data", engine, if_exists="append", index=False, method='multi')
-                    print(f"Inserted {len(df)} rows.")
+        # Insert into DB
+        df.to_sql("trap_data", engine, if_exists="append", index=False, method='multi')
+        print(f"Inserted {len(df)} rows.")
 
 def main():
     print("Listing files in offline folder...")
     files = list_local_files(OFFLINE_DIR)
-    print(f"Found {len(files)} .tar.gz files.")
+    print(f"Found {len(files)} .csv.gz files.")
 
     for file_name in files:
         file_path = os.path.join(OFFLINE_DIR, file_name)
