@@ -113,8 +113,7 @@ def mark_file_processed(file_id, file_name):
 
 def extract_and_ingest(file_path):
     with gzip.open(file_path, 'rt') as f:
-        df = pd.read_csv(f, dtype=str, sep='\t', engine='python')
-        print(f"Columns found in file: {df.columns.tolist()}")
+        df = pd.read_csv(f, dtype=str, sep=',')
 
         # Rename columns to match DB schema
         df = df.rename(columns={
