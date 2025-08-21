@@ -16,9 +16,8 @@ services:
       - db
     environment:
       - DATABASE_URL=postgresql://trapuser:trappass@db:5432/trapdb
-      - DRIVE_FOLDER_ID=1o6t6tFoK8t9ihUtLonHCpzMMX38qi71x
     volumes:
-      - ./data:/app/data
+      - ./offline:/app/offline
     command: python app.py
 
 volumes:
