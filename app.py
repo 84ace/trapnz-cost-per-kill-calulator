@@ -111,11 +111,23 @@ def mark_file_processed(file_id, file_name):
             # The transaction is rolled back automatically by conn.begin()
             return False
 
+def read_gzipped_file_with_progress(file_path, chunk_size=100000):
+    """
+    A generator that reads a gzipped file line by line and prints progress.
+    """
+    with gzip.open(file_path, 'rt') as f:
+        line_count = 0
+        for line in f:
+            yield line
+            line_count += 1
+            if line_count % chunk_size == 0:
+                print(f"[{os.getpid()}] ... parsed {line_count} lines from {os.path.basename(file_path)}")
+
 def extract_and_ingest(file_path):
     print(f"[{os.getpid()}] Decompressing and parsing {os.path.basename(file_path)}...")
-    with gzip.open(file_path, 'rt') as f:
-        df = pd.read_csv(f, dtype=str, sep=',')
-    print(f"[{os.getpid()}] Parsed {len(df)} rows from {os.path.basename(file_path)}.")
+    line_iterator = read_gzipped_file_with_progress(file_path)
+    df = pd.read_csv(line_iterator, dtype=str, sep=',')
+    print(f"[{os.getpid()}] Finished parsing. Total rows: {len(df)}")
 
     print(f"[{os.getpid()}] Transforming data for {os.path.basename(file_path)}...")
     # Rename columns to match DB schema
