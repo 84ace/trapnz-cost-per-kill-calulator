@@ -79,8 +79,11 @@ with engine.connect() as conn:
 
 def list_local_files(directory):
     """Lists .tar.gz files in the specified directory."""
+    print(f"Scanning for files in: {directory}")
+    all_files = os.listdir(directory)
+    print(f"Found items: {all_files}")
     files = []
-    for f in os.listdir(directory):
+    for f in all_files:
         if f.lower().endswith(".tar.gz"):
             files.append(f)
     return files
